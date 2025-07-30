@@ -1,0 +1,42 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.env
+*.venv/
+.env
+.venv/
+env/
+venv/
+build/
+dist/
+*.egg-info/
+
+# === Output files ===
+*.xlsx
+*.csv
+*.xlsm
+*.xlsb
+*.tmp
+
+# === Tesseract temp ===
+tessinput.txt
+tessoutput.txt
+
+# === OS-specific ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# === IDEs ===
+.vscode/
+.idea/
+
+# === Logs and debug ===
+*.log
+
+# === Receipts and images ===
+data/temp_receipts/*
+!data/temp_receipts/.keep  # Optional: keep folder structure
