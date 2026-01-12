@@ -37,6 +37,10 @@ desktop.ini
 # === Logs and debug ===
 *.log
 
+# === Local state ===
+.processed_files.json
+
 # === Receipts and images ===
 input/*.jpg
+input/*.pdf
 !input/.keep  # Optional: keep folder structure

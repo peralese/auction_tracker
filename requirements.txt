@@ -2,3 +2,4 @@ pytesseract
 Pillow
 pandas
 openpyxl
+pdf2image

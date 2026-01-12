@@ -7,6 +7,7 @@ This tool automates the process of extracting item purchases from auction receip
 ## 🚀 Features
 
 - 🧠 Tesseract OCR for reading printed auction receipts
+- 📄 PDF receipt support (via Poppler)
 - 🔎 Regex-based parsing for extracting item names and prices
 - ❌ Filters out totals, taxes, and non-item summary lines
 - 💾 Outputs structured data to Excel file (`All_Items.xlsx`)
@@ -36,7 +37,7 @@ Invoice Total:         $75.00
 
 ## 🧪 How to Use
 
-1. **Place receipt image(s)** in:
+1. **Place receipt file(s)** in:
    ```
    input/
    ```
@@ -52,7 +53,9 @@ Invoice Total:         $75.00
    ```
 
 Notes:
-- All `.jpg` files in `input/` are processed each run.
+- All `.jpg` and `.pdf` files in `input/` are processed each run.
+- Processed files are tracked in `.processed_files.json` to avoid reprocessing.
+- To reprocess old files, delete `.processed_files.json`.
 
 ---
 
@@ -60,9 +63,10 @@ Notes:
 
 - Python 3.8+
 - Tesseract-OCR (installed and added to PATH)
+- Poppler (required for PDF support)
 - Python packages:
   ```bash
-  pip install pytesseract pillow pandas openpyxl
+  pip install pytesseract pillow pandas openpyxl pdf2image
   ```
 
 ---
@@ -91,6 +95,33 @@ tesseract --version
 
 ```powershell
 tesseract --version
+```
+
+---
+
+## 🧩 Install Notes (Poppler for PDF Support)
+
+### Linux (Pop!_OS / Ubuntu)
+
+```bash
+sudo apt update
+sudo apt install poppler-utils
+```
+
+Verify:
+
+```bash
+pdftoppm -h
+```
+
+### Windows
+
+1. Download a Poppler build (e.g., from: https://github.com/oschwartz10612/poppler-windows/releases)
+2. Extract and add the `bin` folder to your PATH.
+3. Verify in PowerShell:
+
+```powershell
+pdftoppm -h
 ```
 
 ---
@@ -124,7 +155,6 @@ To ensure clean data extraction, the parser **excludes lines containing**:
 - [ ] Flask UI for uploading receipts and managing listings
 - [ ] eBay API integration to push listings
 - [ ] Tagging support: category, condition, auction name
-- [ ] PDF receipt support with `pdf2image`
 
 ---
 
