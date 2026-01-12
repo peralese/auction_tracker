@@ -2,6 +2,7 @@ import pytesseract
 from PIL import Image
 import re
 from datetime import datetime
+from pathlib import Path
 import pandas as pd
 from PIL import ImageOps
 
@@ -35,12 +36,11 @@ def parse_items(text):
         if not line or any(keyword.lower() in line.lower() for keyword in exclude_keywords):
             continue
         
-        # Match lines like: Some Item Name        $12.00
-        # match = re.search(r'(.+?)\s+\$?(\d+\.\d{2})$', line)
-        match = re.search(r'(.+?)\s+\$?\s?(\d{1,4}\.\d{2})', line)
+        # Match lines like: Some Item Name        $12.00 (price anchored at end)
+        match = re.search(r'^(.+?)\s+\$?\s*([0-9]{1,3}(?:,[0-9]{3})*|[0-9]{1,6})\.(\d{2})\s*$', line)
         if match:
             item = match.group(1).strip()
-            cost = float(match.group(2))
+            cost = float(f"{match.group(2).replace(',', '')}.{match.group(3)}")
             parsed_items.append({
                 'Date': datetime.today().strftime('%Y-%m-%d'),
                 'Item': item,
@@ -60,20 +60,46 @@ def save_to_excel(parsed_items, output_path='All_Items.xlsx'):
         df = pd.concat([existing, df], ignore_index=True)
     except FileNotFoundError:
         pass  # file doesn't exist yet
+    except Exception as exc:
+        raise RuntimeError(f"Failed to read existing Excel file: {output_path}") from exc
 
     df.to_excel(output_path, index=False)
 
 # === Example Usage ===
 if __name__ == '__main__':
-    image_path = 'data/temp_receipts/sample_receipt.jpg'  # Update path as needed
-    text = extract_text_from_image(image_path)
-    items = parse_items(text)
-    
-    if items:
-        print("Extracted Items:")
-        for item in items:
+    input_dir = Path('input')
+    image_paths = sorted(input_dir.glob('*.jpg'))
+    if not image_paths:
+        print(f"No .jpg files found in: {input_dir}")
+        raise SystemExit(1)
+
+    all_items = []
+    for image_path in image_paths:
+        try:
+            text = extract_text_from_image(str(image_path))
+        except FileNotFoundError:
+            print(f"Receipt image not found: {image_path}")
+            raise SystemExit(1)
+        except Exception as exc:
+            print(f"Failed to OCR receipt image '{image_path}': {exc}")
+            raise SystemExit(1)
+
+        items = parse_items(text)
+        all_items.extend(items)
+        if items:
+            print(f"Extracted {len(items)} items from {image_path}")
+        else:
+            print(f"No items found in {image_path}")
+
+    if all_items:
+        print("\nExtracted Items:")
+        for item in all_items:
             print(f"- {item['Item']} : ${item['Cost']}")
-        save_to_excel(items)
+        try:
+            save_to_excel(all_items)
+        except Exception as exc:
+            print(f"Failed to save Excel output: {exc}")
+            raise SystemExit(1)
         print("\nSaved to 'All_Items.xlsx'")
     else:
         print("No items found.")

@@ -38,5 +38,5 @@ desktop.ini
 *.log
 
 # === Receipts and images ===
-data/temp_receipts/*
-!data/temp_receipts/.keep  # Optional: keep folder structure
+input/*.jpg
+!input/.keep  # Optional: keep folder structure

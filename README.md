@@ -36,9 +36,9 @@ Invoice Total:         $75.00
 
 ## 🧪 How to Use
 
-1. **Place receipt image** in:
+1. **Place receipt image(s)** in:
    ```
-   data/temp_receipts/sample_receipt.jpg
+   input/
    ```
 
 2. **Run the script**:
@@ -51,6 +51,9 @@ Invoice Total:         $75.00
    All_Items.xlsx
    ```
 
+Notes:
+- All `.jpg` files in `input/` are processed each run.
+
 ---
 
 ## 🛠️ Requirements
@@ -61,6 +64,34 @@ Invoice Total:         $75.00
   ```bash
   pip install pytesseract pillow pandas openpyxl
   ```
+
+---
+
+## 🧩 Install Notes (Tesseract OCR)
+
+### Linux (Pop!_OS / Ubuntu)
+
+```bash
+sudo apt update
+sudo apt install tesseract-ocr
+```
+
+Verify:
+
+```bash
+tesseract --version
+```
+
+### Windows
+
+1. Download the installer from the official repo:  
+   https://github.com/UB-Mannheim/tesseract/wiki
+2. Install and add Tesseract to your PATH (the installer offers this option).
+3. Verify in PowerShell:
+
+```powershell
+tesseract --version
+```
 
 ---
 
