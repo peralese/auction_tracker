@@ -19,6 +19,27 @@ EXCLUDE_KEYWORDS = [
 ]
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
 PDF_SUFFIXES = {".pdf"}
+AMOUNT_PATTERN = r'\$?(?:[0-9]{1,3}(?:,[0-9]{3})*|[0-9]{1,6})\.\d{2}'
+LINE_ITEM_PATTERNS = [
+    re.compile(
+        rf'^(?:\d+\s+)?(?P<item>.+?)\s+(?P<qty>\d+)\s*(?:[xX]|×)\s*(?P<unit>{AMOUNT_PATTERN})\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
+    ),
+    re.compile(
+        rf'^(?:\d+\s+)?(?P<item>.+?)\s+(?P<qty>\d+)\s+(?P<unit>{AMOUNT_PATTERN})\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
+    ),
+    re.compile(
+        rf'^(?:\d+\s+)?(?P<item>[A-Za-z].*?)\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
+    ),
+]
+PRICING_ONLY_PATTERNS = [
+    re.compile(
+        rf'^(?P<qty>\d+)\s*(?:[xX]|×)\s*(?P<unit>{AMOUNT_PATTERN})\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
+    ),
+    re.compile(
+        rf'^(?P<qty>\d+)\s+(?P<unit>{AMOUNT_PATTERN})\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
+    ),
+    re.compile(rf'^(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'),
+]
 
 
 # === Step 1: Preprocess the image ===
@@ -84,23 +105,83 @@ def build_item(item, extended, processed_at=None):
     }
 
 
+def normalize_line(line):
+    return re.sub(r'\s+', ' ', line.replace('×', 'x')).strip()
+
+
+def parse_amount(value):
+    return float(value.replace('$', '').replace(',', ''))
+
+
+def extract_item_from_line(line, processed_at=None):
+    for pattern in LINE_ITEM_PATTERNS:
+        match = pattern.search(line)
+        if not match:
+            continue
+        item = match.group('item').strip(' -:')
+        if not item:
+            return None
+        return build_item(item, parse_amount(match.group('extended')), processed_at=processed_at)
+    return None
+
+
+def extract_item_from_pending(pending_description, line, processed_at=None):
+    if not pending_description:
+        return None
+
+    combined_line = f"{pending_description} {line}".strip()
+    direct_match = extract_item_from_line(combined_line, processed_at=processed_at)
+    if direct_match:
+        return direct_match
+
+    for pattern in PRICING_ONLY_PATTERNS:
+        match = pattern.search(line)
+        if not match:
+            continue
+        return build_item(
+            pending_description.strip(' -:'),
+            parse_amount(match.group('extended')),
+            processed_at=processed_at,
+        )
+    return None
+
+
+def looks_like_description_fragment(line):
+    if re.search(AMOUNT_PATTERN, line):
+        return False
+    return bool(re.search(r'[A-Za-z]', line))
+
+
 # === Step 3: Parse item lines ===
 def parse_items(text, processed_at=None):
-    lines = text.split('\n')
     parsed_items = []
-    for line in lines:
-        line = line.strip()
+    pending_description = None
+
+    for raw_line in text.splitlines():
+        line = normalize_line(raw_line)
         if not line or any(keyword.lower() in line.lower() for keyword in EXCLUDE_KEYWORDS):
             continue
 
-        match = re.search(
-            r'^(?:\d+\s+)?(.+?)\s+\d+\s*x\s*([0-9]{1,3}(?:,[0-9]{3})*|[0-9]{1,6})\.(\d{2})\s+([0-9]{1,3}(?:,[0-9]{3})*|[0-9]{1,6})\.(\d{2})\b',
-            line,
-        )
-        if match:
-            item = match.group(1).strip()
-            extended = float(f"{match.group(4).replace(',', '')}.{match.group(5)}")
-            parsed_items.append(build_item(item, extended, processed_at=processed_at))
+        item = extract_item_from_pending(pending_description, line, processed_at=processed_at)
+        if item:
+            parsed_items.append(item)
+            pending_description = None
+            continue
+
+        item = extract_item_from_line(line, processed_at=processed_at)
+        if item:
+            parsed_items.append(item)
+            pending_description = None
+            continue
+
+        if looks_like_description_fragment(line):
+            if pending_description:
+                pending_description = f"{pending_description} {line}".strip()
+            else:
+                pending_description = line
+        else:
+            pending_description = None
+
     return parsed_items
 
 

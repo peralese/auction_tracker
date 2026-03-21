@@ -14,11 +14,14 @@ This tool extracts purchased items from auction invoices using Tesseract OCR and
 
 ## Supported Input Format
 
-The parser currently expects invoice lines similar to this OCR output:
+The parser currently supports several common OCR invoice layouts, including invoice rows, simple item-price rows, and split description/pricing lines:
 
 ```text
 363 WWII German Helmet 1 x 25.00 25.00 T
-364 WWII Uniform Jacket 1 x 40.00 40.00 T
+364 WWII Uniform Jacket 2 20.00 40.00 T
+WWII Medal $18.00
+Vintage Military Coat
+1 x 40.00 40.00 T
 Tax1 Default 13.00
 Invoice Total 78.00
 ```
@@ -34,6 +37,7 @@ Notes:
 - The `Date` column is the processing date, not the invoice date.
 - Supported file types are `.jpg`, `.jpeg`, `.png`, and `.pdf`, case-insensitive.
 - Files are marked as processed even when OCR succeeds but no item rows match.
+- Supported line formats include `qty x unit extended`, `qty unit extended`, simple `item price`, and description lines followed by pricing on the next line.
 
 ## How to Use
 
@@ -104,7 +108,6 @@ The parser excludes lines containing:
 
 ## Roadmap
 
-- Improve parser coverage for more OCR and invoice layout variations
 - Extract richer invoice metadata such as invoice date, invoice number, and auction details
 - Add end-to-end validation with real sample invoices and expected outputs
 - Improve output structure with per-run files, timestamps, or additional workbook tabs
@@ -115,4 +118,7 @@ The parser excludes lines containing:
 
 ## License
 
-MIT
+MIT License. Use freely, modify, and share!
+
+Author
+Erick Perales — IT Architect, Cloud Migration Specialist

@@ -33,6 +33,30 @@ class ParseItemsTests(unittest.TestCase):
         self.assertEqual(items[0]['Item'], 'Vintage Lamp')
         self.assertEqual(items[0]['Cost'], 1200.0)
 
+    def test_handles_simple_item_price_format(self):
+        items = main.parse_items('WWII German Helmet $25.00')
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['Item'], 'WWII German Helmet')
+        self.assertEqual(items[0]['Cost'], 25.0)
+
+    def test_handles_missing_x_between_qty_and_prices(self):
+        items = main.parse_items('364 Uniform Jacket 2 20.00 40.00 T')
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['Item'], 'Uniform Jacket')
+        self.assertEqual(items[0]['Cost'], 40.0)
+
+    def test_handles_split_description_and_pricing_lines(self):
+        items = main.parse_items('Vintage Military Coat\n1 x 40.00 40.00 T')
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['Item'], 'Vintage Military Coat')
+        self.assertEqual(items[0]['Cost'], 40.0)
+
+    def test_handles_split_description_with_extended_only_line(self):
+        items = main.parse_items('Antique Map Poster\n$35.00')
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['Item'], 'Antique Map Poster')
+        self.assertEqual(items[0]['Cost'], 35.0)
+
 
 class DiscoveryTests(unittest.TestCase):
     def test_discovers_supported_extensions_case_insensitively(self):
