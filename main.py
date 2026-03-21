@@ -2,6 +2,13 @@ import hashlib
 import json
 import re
 from datetime import datetime
+
+DATE_PATTERNS = [
+    re.compile(r'\bdate\s*[:#-]?\s*(?P<date>\d{1,2}/\d{1,2}/\d{2,4})\b', re.IGNORECASE),
+    re.compile(r'\b(?P<date>\d{1,2}/\d{1,2}/\d{2,4})\b'),
+]
+DATE_FORMATS = ['%m/%d/%Y', '%m/%d/%y']
+
 from pathlib import Path
 
 import pandas as pd
@@ -39,6 +46,16 @@ PRICING_ONLY_PATTERNS = [
         rf'^(?P<qty>\d+)\s+(?P<unit>{AMOUNT_PATTERN})\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
     ),
     re.compile(rf'^(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'),
+]
+TABLE_END_SUBSTRINGS = [
+    'total quantity',
+    'total extended price',
+    "buyer's premium",
+    'remaining invoice balance',
+    'premium is',
+    'refunds will not be given',
+    'all sales are final',
+    'double check order',
 ]
 NON_ITEM_SUBSTRINGS = [
     'http://',
@@ -117,10 +134,31 @@ def parse_amount(value):
     return float(value.replace('$', '').replace(',', ''))
 
 
-def build_item(item, extended, processed_at=None, lot_number=None):
+def format_invoice_date(value):
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(value, fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    return None
+
+
+def extract_invoice_date(text):
+    for pattern in DATE_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        formatted = format_invoice_date(match.group('date'))
+        if formatted:
+            return formatted
+    return None
+
+
+def build_item(item, extended, processed_at=None, lot_number=None, invoice_date=None):
     processed_at = processed_at or datetime.today()
+    item_date = invoice_date or processed_at.strftime('%Y-%m-%d')
     return {
-        'Date': processed_at.strftime('%Y-%m-%d'),
+        'Date': item_date,
         'Lot Number': lot_number,
         'Item': item,
         'Cost': extended,
@@ -130,7 +168,7 @@ def build_item(item, extended, processed_at=None, lot_number=None):
     }
 
 
-def extract_item_from_line(line, processed_at=None):
+def extract_item_from_line(line, processed_at=None, invoice_date=None):
     for pattern in LINE_ITEM_PATTERNS:
         match = pattern.search(line)
         if not match:
@@ -144,16 +182,17 @@ def extract_item_from_line(line, processed_at=None):
             parse_amount(match.group('extended')),
             processed_at=processed_at,
             lot_number=lot_number,
+            invoice_date=invoice_date,
         )
     return None
 
 
-def extract_item_from_pending(pending_description, line, processed_at=None):
+def extract_item_from_pending(pending_description, line, processed_at=None, invoice_date=None):
     if not pending_description:
         return None
 
     combined_line = f"{pending_description} {line}".strip()
-    direct_match = extract_item_from_line(combined_line, processed_at=processed_at)
+    direct_match = extract_item_from_line(combined_line, processed_at=processed_at, invoice_date=invoice_date)
     if direct_match:
         return direct_match
 
@@ -169,6 +208,7 @@ def extract_item_from_pending(pending_description, line, processed_at=None):
             parse_amount(match.group('extended')),
             processed_at=processed_at,
             lot_number=lot_number,
+            invoice_date=invoice_date,
         )
     return None
 
@@ -207,11 +247,17 @@ def relevant_text_lines(text):
             break
 
     if table_start is not None:
-        return normalized_lines[table_start:]
+        table_lines = []
+        for line in normalized_lines[table_start:]:
+            lowered = line.lower()
+            if any(fragment in lowered for fragment in TABLE_END_SUBSTRINGS):
+                break
+            table_lines.append(line)
+        return table_lines
     return normalized_lines
 
 
-def parse_items(text, processed_at=None):
+def parse_items(text, processed_at=None, invoice_date=None):
     parsed_items = []
     pending_description = None
 
@@ -220,13 +266,13 @@ def parse_items(text, processed_at=None):
             pending_description = None
             continue
 
-        item = extract_item_from_pending(pending_description, line, processed_at=processed_at)
+        item = extract_item_from_pending(pending_description, line, processed_at=processed_at, invoice_date=invoice_date)
         if item:
             parsed_items.append(item)
             pending_description = None
             continue
 
-        item = extract_item_from_line(line, processed_at=processed_at)
+        item = extract_item_from_line(line, processed_at=processed_at, invoice_date=invoice_date)
         if item:
             parsed_items.append(item)
             pending_description = None
@@ -245,19 +291,62 @@ def parse_items(text, processed_at=None):
     return parsed_items
 
 
-def save_to_excel(parsed_items, output_path=Path('output') / 'All_Items.xlsx'):
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    df = pd.DataFrame(parsed_items)
-    try:
-        existing = pd.read_excel(output_path)
-        df = pd.concat([existing, df], ignore_index=True)
-    except FileNotFoundError:
-        pass
-    except Exception as exc:
-        raise RuntimeError(f"Failed to read existing Excel file: {output_path}") from exc
+def build_output_paths(output_dir, run_timestamp=None):
+    output_dir = Path(output_dir)
+    run_timestamp = run_timestamp or datetime.now()
+    timestamp_label = run_timestamp.strftime('%Y%m%d_%H%M%S')
+    runs_dir = output_dir / 'runs'
+    return {
+        'output_dir': output_dir,
+        'runs_dir': runs_dir,
+        'master_path': output_dir / 'All_Items.xlsx',
+        'run_path': runs_dir / f'Auction_Items_{timestamp_label}.xlsx',
+        'timestamp_label': timestamp_label,
+    }
 
-    df.to_excel(output_path, index=False)
+
+def build_run_summary(parsed_items, run_timestamp):
+    subtotal = round(sum(item['Cost'] for item in parsed_items), 2)
+    premium_total = round(sum(item['Buyer Premium (20%)'] for item in parsed_items), 2)
+    grand_total = round(sum(item['Total Cost'] for item in parsed_items), 2)
+    distinct_lots = len({item['Lot Number'] for item in parsed_items if item.get('Lot Number')})
+    return pd.DataFrame([
+        {
+            'Run Timestamp': run_timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+            'Items Extracted': len(parsed_items),
+            'Distinct Lots': distinct_lots,
+            'Subtotal Cost': subtotal,
+            'Buyer Premium Total': premium_total,
+            'Grand Total': grand_total,
+        }
+    ])
+
+
+def save_to_excel(parsed_items, output_dir=Path('output'), run_timestamp=None):
+    paths = build_output_paths(output_dir, run_timestamp=run_timestamp)
+    paths['output_dir'].mkdir(parents=True, exist_ok=True)
+    paths['runs_dir'].mkdir(parents=True, exist_ok=True)
+
+    run_timestamp = run_timestamp or datetime.now()
+    run_df = pd.DataFrame(parsed_items)
+    summary_df = build_run_summary(parsed_items, run_timestamp)
+
+    try:
+        existing = pd.read_excel(paths['master_path'])
+        master_df = pd.concat([existing, run_df], ignore_index=True)
+    except FileNotFoundError:
+        master_df = run_df
+    except Exception as exc:
+        raise RuntimeError(f"Failed to read existing Excel file: {paths['master_path']}") from exc
+
+    with pd.ExcelWriter(paths['master_path'], engine='openpyxl') as writer:
+        master_df.to_excel(writer, sheet_name='All Items', index=False)
+
+    with pd.ExcelWriter(paths['run_path'], engine='openpyxl') as writer:
+        run_df.to_excel(writer, sheet_name='Items', index=False)
+        summary_df.to_excel(writer, sheet_name='Run Summary', index=False)
+
+    return paths
 
 
 def discover_input_files(input_dir):
@@ -284,7 +373,8 @@ def processed_metadata(path, processed_at=None):
 
 def process_image_file(image_path, processed_at=None):
     text = extract_text_from_image(str(image_path))
-    return parse_items(text, processed_at=processed_at)
+    invoice_date = extract_invoice_date(text)
+    return parse_items(text, processed_at=processed_at, invoice_date=invoice_date)
 
 
 def process_pdf_file(pdf_path, processed_at=None):
@@ -292,10 +382,12 @@ def process_pdf_file(pdf_path, processed_at=None):
     if not pages:
         return []
 
+    page_texts = [extract_text_from_pil(page) for page in pages]
+    invoice_date = extract_invoice_date('\n'.join(page_texts))
+
     all_items = []
-    for page in pages:
-        text = extract_text_from_pil(page)
-        all_items.extend(parse_items(text, processed_at=processed_at))
+    for text in page_texts:
+        all_items.extend(parse_items(text, processed_at=processed_at, invoice_date=invoice_date))
     return all_items
 
 
@@ -361,7 +453,8 @@ def process_pending_files(image_paths, pdf_paths, processed_hashes):
                 print(f"Failed to OCR '{pdf_path}' page {page_index}: {exc}")
                 raise SystemExit(1)
 
-            items = parse_items(text, processed_at=processed_at)
+            invoice_date = extract_invoice_date(text)
+            items = parse_items(text, processed_at=processed_at, invoice_date=invoice_date)
             file_items.extend(items)
             if items:
                 print(f"Extracted {len(items)} items from {pdf_path} page {page_index}")

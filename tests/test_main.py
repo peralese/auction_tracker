@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
+import pandas as pd
+
 import main
 
 
@@ -71,6 +73,27 @@ class ParseItemsTests(unittest.TestCase):
                 ('287', 'Coffee Table Books Militaria', 5.0),
             ],
         )
+
+    def test_uses_invoice_date_when_present(self):
+        items = main.parse_items(
+            'Invoice #: 91302\nDate: 3/20/2026\nLot# DESCRIPTION\n404 Socket Bayonet 1 x 50.00 50.00 T',
+            processed_at=datetime(2026, 3, 21, 8, 0, 0),
+            invoice_date='2026-03-20',
+        )
+        self.assertEqual(items[0]['Date'], '2026-03-20')
+
+    def test_stops_before_footer_text(self):
+        sample_text = """Date: 3/20/2026
+Lot# DESCRIPTION QUANTITY UNIT PRICE EXTENDED PRICE
+663 Scarce 1967 Snoopy and His Friends: The Royal
+Guardsmen LP RECORD 1 x 6.00 6.00 T
+PREMIUM IS 20% USING CURRENCY PAY 16% CASH ALL SALES ARE FINAL
+"""
+        items = main.parse_items(sample_text, invoice_date='2026-03-20')
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['Date'], '2026-03-20')
+        self.assertEqual(items[0]['Lot Number'], '663')
+        self.assertEqual(items[0]['Item'], 'Scarce 1967 Snoopy and His Friends: The Royal Guardsmen LP RECORD')
 
     def test_parses_table_section_without_header_noise(self):
         sample_text = """On Site Pickup by scheduled appointment time Only. Scheduling through the link on your invoice:
@@ -145,6 +168,41 @@ class WorkflowTests(unittest.TestCase):
             [(item['Lot Number'], item['Item']) for item in items],
             [('17', 'First Item'), ('284', 'Second Item')],
         )
+
+    def test_save_to_excel_creates_master_and_run_workbooks(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir) / 'output'
+            run_timestamp = datetime(2026, 3, 21, 9, 45, 30)
+            items = [
+                {
+                    'Date': '2026-03-21',
+                    'Lot Number': '17',
+                    'Item': 'Vases & Candle Holders',
+                    'Cost': 65.0,
+                    'Buyer Premium (20%)': 13.0,
+                    'Total Cost': 78.0,
+                    'Selected for Listing': 'N',
+                }
+            ]
+
+            paths = main.save_to_excel(items, output_dir=output_dir, run_timestamp=run_timestamp)
+
+            self.assertTrue(paths['master_path'].exists())
+            self.assertTrue(paths['run_path'].exists())
+
+            master_book = pd.ExcelFile(paths['master_path'])
+            run_book = pd.ExcelFile(paths['run_path'])
+            self.assertEqual(master_book.sheet_names, ['All Items'])
+            self.assertEqual(run_book.sheet_names, ['Items', 'Run Summary'])
+
+            master_df = pd.read_excel(paths['master_path'], sheet_name='All Items')
+            run_df = pd.read_excel(paths['run_path'], sheet_name='Items')
+            summary_df = pd.read_excel(paths['run_path'], sheet_name='Run Summary')
+
+            self.assertEqual(len(master_df), 1)
+            self.assertEqual(len(run_df), 1)
+            self.assertEqual(summary_df.loc[0, 'Items Extracted'], 1)
+            self.assertEqual(summary_df.loc[0, 'Grand Total'], 78.0)
 
     def test_save_and_load_processed_hashes_round_trip(self):
         with tempfile.TemporaryDirectory() as tmpdir:

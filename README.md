@@ -9,7 +9,9 @@ This tool extracts purchased items from auction invoices using Tesseract OCR and
 - Regex-based parsing for invoice table rows and multiline descriptions
 - Lot number extraction from invoice rows
 - Filters for totals, taxes, header text, shipping blocks, and summary rows
-- Structured Excel output in `output/All_Items.xlsx`
+- Cumulative Excel output in `output/All_Items.xlsx`
+- Timestamped per-run workbooks in `output/runs/`
+- Dedicated `Items` and `Run Summary` tabs for each run workbook
 - Automatic buyer-premium and total-cost calculation
 - Processed-file tracking in `.processed_files.json`
 
@@ -34,17 +36,19 @@ That produces rows like:
 | 2026-03-20 | 284 | World War II Coffee Table Books Jones and Summerville authors. | 10.0 | 2.0 | 12.0 | N |
 
 Notes:
-- `Date` is the processing date.
+- `Date` uses the invoice date when it is detected in OCR text; otherwise it falls back to the processing date.
 - `Lot Number` is extracted from the leading table value when present.
 - Supported file types are `.jpg`, `.jpeg`, `.png`, and `.pdf`, case-insensitive.
 - Files are marked as processed even when OCR succeeds but no item rows match.
+- Each run creates a timestamped workbook with `Items` and `Run Summary` tabs.
 - Supported line formats include `qty x unit extended`, `qty unit extended`, simple `item price`, and multiline descriptions followed by pricing on the next line.
 
 ## How to Use
 
 1. Place invoice files in `input/`.
 2. Run `python3 main.py`.
-3. Review `output/All_Items.xlsx`.
+3. Review `output/All_Items.xlsx` for the cumulative history.
+4. Review the latest file in `output/runs/` for the timestamped run workbook and summary tab.
 
 If you need to reprocess files, delete `.processed_files.json`.
 
