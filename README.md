@@ -1,144 +1,99 @@
-# 🧾 Auction Tracker — OCR to Google Sheets MVP
+# Auction Tracker
 
-This tool automates the process of extracting item purchases from auction receipts using Tesseract OCR and exports them into a structured Excel file (or Google Sheet, in future versions). It is designed to help you manage auction spending and prepare listings for resale platforms like eBay.
+This tool extracts purchased items from auction invoices using Tesseract OCR and exports them into a structured Excel workbook. The current parser is tuned for invoice-style line items that include quantity, unit price, and extended price.
 
----
+## Features
 
-## 🚀 Features
+- Tesseract OCR for printed auction invoices and receipts
+- PDF support via Poppler and `pdf2image`
+- Regex-based parsing for auction invoice lines
+- Filters for totals, taxes, and summary rows
+- Structured Excel output in `output/All_Items.xlsx`
+- Automatic buyer-premium and total-cost calculation
+- Processed-file tracking in `.processed_files.json`
 
-- 🧠 Tesseract OCR for reading printed auction receipts
-- 📄 PDF receipt support (via Poppler)
-- 🔎 Regex-based parsing for extracting item names and prices
-- ❌ Filters out totals, taxes, and non-item summary lines
-- 💾 Outputs structured data to Excel file (`All_Items.xlsx`)
-- 🧮 Auto-calculates 20% buyer premium and total cost
-- 📅 Automatically timestamps the purchase date
-- ✅ Ready for future Google Sheets & eBay API integration
+## Supported Input Format
 
----
+The parser currently expects invoice lines similar to this OCR output:
 
-## 🖼️ Example Receipt Format (OCR Input)
-
-```
-WWII German Helmet     $25.00  
-WWII Uniform Jacket    $40.00  
-Tax1 Default:          $5.00  
-Invoice Total:         $75.00  
+```text
+363 WWII German Helmet 1 x 25.00 25.00 T
+364 WWII Uniform Jacket 1 x 40.00 40.00 T
+Tax1 Default 13.00
+Invoice Total 78.00
 ```
 
-➡️ Output:
+That produces rows like:
 
-| Date       | Item                | Cost | Buyer Premium (20%) | Total Cost | Selected for Listing |
-|------------|---------------------|------|----------------------|------------|-----------------------|
-| 2025-07-29 | WWII German Helmet  | 25.0 | 5.0                  | 30.0       | N                     |
-| 2025-07-29 | WWII Uniform Jacket | 40.0 | 8.0                  | 48.0       | N                     |
-
----
-
-## 🧪 How to Use
-
-1. **Place receipt file(s)** in:
-   ```
-   input/
-   ```
-
-2. **Run the script**:
-   ```bash
-   python main.py
-   ```
-
-3. **Check the output**:
-   ```
-   All_Items.xlsx
-   ```
+| Date | Item | Cost | Buyer Premium (20%) | Total Cost | Selected for Listing |
+| --- | --- | --- | --- | --- | --- |
+| 2026-03-20 | WWII German Helmet | 25.0 | 5.0 | 30.0 | N |
+| 2026-03-20 | WWII Uniform Jacket | 40.0 | 8.0 | 48.0 | N |
 
 Notes:
-- All `.jpg` and `.pdf` files in `input/` are processed each run.
-- Processed files are tracked in `.processed_files.json` to avoid reprocessing.
-- To reprocess old files, delete `.processed_files.json`.
+- The `Date` column is the processing date, not the invoice date.
+- Supported file types are `.jpg`, `.jpeg`, `.png`, and `.pdf`, case-insensitive.
+- Files are marked as processed even when OCR succeeds but no item rows match.
 
----
+## How to Use
 
-## 🛠️ Requirements
+1. Place invoice files in `input/`.
+2. Run `python3 main.py`.
+3. Review `output/All_Items.xlsx`.
+
+If you need to reprocess files, delete `.processed_files.json`.
+
+## Requirements
 
 - Python 3.8+
-- Tesseract-OCR (installed and added to PATH)
-- Poppler (required for PDF support)
-- Python packages:
-  ```bash
-  pip install pytesseract pillow pandas openpyxl pdf2image
-  ```
+- Tesseract OCR installed and available on `PATH`
+- Poppler installed for PDF support
+- Python packages from `requirements.txt`
 
----
+Install Python dependencies with:
 
-## 🧩 Install Notes (Tesseract OCR)
+```bash
+pip install -r requirements.txt
+```
 
-### Linux (Pop!_OS / Ubuntu)
+## Install Notes
+
+### Ubuntu / Debian
+
+Install Tesseract:
 
 ```bash
 sudo apt update
 sudo apt install tesseract-ocr
 ```
 
-Verify:
-
-```bash
-tesseract --version
-```
-
-### Windows
-
-1. Download the installer from the official repo:  
-   https://github.com/UB-Mannheim/tesseract/wiki
-2. Install and add Tesseract to your PATH (the installer offers this option).
-3. Verify in PowerShell:
-
-```powershell
-tesseract --version
-```
-
----
-
-## 🧩 Install Notes (Poppler for PDF Support)
-
-### Linux (Pop!_OS / Ubuntu)
+Install Poppler:
 
 ```bash
 sudo apt update
 sudo apt install poppler-utils
 ```
 
-Verify:
+Verify both tools:
 
 ```bash
+tesseract --version
 pdftoppm -h
 ```
 
 ### Windows
 
-1. Download a Poppler build (e.g., from: https://github.com/oschwartz10612/poppler-windows/releases)
-2. Extract and add the `bin` folder to your PATH.
-3. Verify in PowerShell:
+Install Tesseract from:
+https://github.com/UB-Mannheim/tesseract/wiki
 
-```powershell
-pdftoppm -h
-```
+Install Poppler from:
+https://github.com/oschwartz10612/poppler-windows/releases
 
----
+Then verify both executables are on `PATH`.
 
-## 🔧 Configuration
+## Filters Applied
 
-If Tesseract is not in your system `PATH`, set the path manually in `main.py`:
-
-```python
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-```
-
----
-
-## 🧼 Filters Applied
-
-To ensure clean data extraction, the parser **excludes lines containing**:
+The parser excludes lines containing:
 
 - `Total Quantity`
 - `Total Extended Price`
@@ -147,21 +102,17 @@ To ensure clean data extraction, the parser **excludes lines containing**:
 - `Invoice Total`
 - `Remaining Invoice Balance`
 
----
+## Roadmap
 
-## 📌 Roadmap
+- Improve parser coverage for more OCR and invoice layout variations
+- Extract richer invoice metadata such as invoice date, invoice number, and auction details
+- Add end-to-end validation with real sample invoices and expected outputs
+- Improve output structure with per-run files, timestamps, or additional workbook tabs
+- Add setup and runtime diagnostics for missing Tesseract and Poppler dependencies
+- Google Sheets integration
+- Upload UI
+- eBay API integration
 
-- [ ] Google Sheets integration using `gspread`
-- [ ] Flask UI for uploading receipts and managing listings
-- [ ] eBay API integration to push listings
-- [ ] Tagging support: category, condition, auction name
+## License
 
----
-
-## 📜 License
-
-MIT License. Use freely, modify, and share!
-
-## Author
-
-Erick Perales  — IT Architect, Cloud Migration Specialist
+MIT
