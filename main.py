@@ -22,13 +22,13 @@ PDF_SUFFIXES = {".pdf"}
 AMOUNT_PATTERN = r'\$?(?:[0-9]{1,3}(?:,[0-9]{3})*|[0-9]{1,6})\.\d{2}'
 LINE_ITEM_PATTERNS = [
     re.compile(
-        rf'^(?:\d+\s+)?(?P<item>.+?)\s+(?P<qty>\d+)\s*(?:[xX]|×)\s*(?P<unit>{AMOUNT_PATTERN})\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
+        rf'^(?:(?P<lot>\d+)\s+)?(?P<item>.+?)\s+(?P<qty>\d+)\s*(?:[xX]|×)\s*(?P<unit>{AMOUNT_PATTERN})\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
     ),
     re.compile(
-        rf'^(?:\d+\s+)?(?P<item>.+?)\s+(?P<qty>\d+)\s+(?P<unit>{AMOUNT_PATTERN})\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
+        rf'^(?:(?P<lot>\d+)\s+)?(?P<item>.+?)\s+(?P<qty>\d+)\s+(?P<unit>{AMOUNT_PATTERN})\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
     ),
     re.compile(
-        rf'^(?:\d+\s+)?(?P<item>[A-Za-z].*?)\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
+        rf'^(?:(?P<lot>\d+)\s+)?(?P<item>[A-Za-z].*?)\s+(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'
     ),
 ]
 PRICING_ONLY_PATTERNS = [
@@ -40,16 +40,32 @@ PRICING_ONLY_PATTERNS = [
     ),
     re.compile(rf'^(?P<extended>{AMOUNT_PATTERN})(?:\s+[A-Z]+)?$'),
 ]
+NON_ITEM_SUBSTRINGS = [
+    'http://',
+    'https://',
+    'ship to',
+    'sold to',
+    'invoice #',
+    'invoice#',
+    'page:',
+    'date:',
+    'pickup',
+    'questions:',
+    'auction sale',
+    'upper right corner',
+    'unpaid',
+    'lot#',
+    'unit price',
+    'extended price',
+]
 
 
-# === Step 1: Preprocess the image ===
 def preprocess_pil(image):
     gray = ImageOps.grayscale(image)
-    enhanced = gray.point(lambda x: 0 if x < 140 else 255, '1')  # Simple threshold
+    enhanced = gray.point(lambda x: 0 if x < 140 else 255, '1')
     return enhanced
 
 
-# === Step 2: Load and OCR the image ===
 def preprocess_image(image_path):
     image = Image.open(image_path)
     return preprocess_pil(image)
@@ -93,24 +109,25 @@ def save_processed_hashes(tracker_path, processed_hashes):
         json.dump(processed_hashes, handle, indent=2, sort_keys=True)
 
 
-def build_item(item, extended, processed_at=None):
-    processed_at = processed_at or datetime.today()
-    return {
-        'Date': processed_at.strftime('%Y-%m-%d'),
-        'Item': item,
-        'Cost': extended,
-        'Buyer Premium (20%)': round(extended * 0.20, 2),
-        'Total Cost': round(extended * 1.20, 2),
-        'Selected for Listing': 'N'
-    }
-
-
 def normalize_line(line):
     return re.sub(r'\s+', ' ', line.replace('×', 'x')).strip()
 
 
 def parse_amount(value):
     return float(value.replace('$', '').replace(',', ''))
+
+
+def build_item(item, extended, processed_at=None, lot_number=None):
+    processed_at = processed_at or datetime.today()
+    return {
+        'Date': processed_at.strftime('%Y-%m-%d'),
+        'Lot Number': lot_number,
+        'Item': item,
+        'Cost': extended,
+        'Buyer Premium (20%)': round(extended * 0.20, 2),
+        'Total Cost': round(extended * 1.20, 2),
+        'Selected for Listing': 'N'
+    }
 
 
 def extract_item_from_line(line, processed_at=None):
@@ -121,7 +138,13 @@ def extract_item_from_line(line, processed_at=None):
         item = match.group('item').strip(' -:')
         if not item:
             return None
-        return build_item(item, parse_amount(match.group('extended')), processed_at=processed_at)
+        lot_number = match.groupdict().get('lot')
+        return build_item(
+            item,
+            parse_amount(match.group('extended')),
+            processed_at=processed_at,
+            lot_number=lot_number,
+        )
     return None
 
 
@@ -138,10 +161,14 @@ def extract_item_from_pending(pending_description, line, processed_at=None):
         match = pattern.search(line)
         if not match:
             continue
+        lot_match = re.match(r'^(?P<lot>\d+)\s+(?P<item>.+)$', pending_description)
+        lot_number = lot_match.group('lot') if lot_match else None
+        item_description = lot_match.group('item') if lot_match else pending_description
         return build_item(
-            pending_description.strip(' -:'),
+            item_description.strip(' -:'),
             parse_amount(match.group('extended')),
             processed_at=processed_at,
+            lot_number=lot_number,
         )
     return None
 
@@ -152,14 +179,45 @@ def looks_like_description_fragment(line):
     return bool(re.search(r'[A-Za-z]', line))
 
 
-# === Step 3: Parse item lines ===
+def starts_with_lot_number(line):
+    return bool(re.match(r'^\d+\s+', line))
+
+
+def is_non_item_line(line):
+    lowered = line.lower()
+    if any(keyword.lower() in lowered for keyword in EXCLUDE_KEYWORDS):
+        return True
+    if any(fragment in lowered for fragment in NON_ITEM_SUBSTRINGS):
+        return True
+    if re.search(r'https?://|\S+@\S+', line):
+        return True
+    if lowered.startswith('invoice ') or lowered.startswith('page ') or lowered.startswith('date '):
+        return True
+    return False
+
+
+def relevant_text_lines(text):
+    normalized_lines = [normalize_line(line) for line in text.splitlines()]
+
+    table_start = None
+    for index, line in enumerate(normalized_lines):
+        lowered = line.lower()
+        if 'lot#' in lowered and 'description' in lowered:
+            table_start = index + 1
+            break
+
+    if table_start is not None:
+        return normalized_lines[table_start:]
+    return normalized_lines
+
+
 def parse_items(text, processed_at=None):
     parsed_items = []
     pending_description = None
 
-    for raw_line in text.splitlines():
-        line = normalize_line(raw_line)
-        if not line or any(keyword.lower() in line.lower() for keyword in EXCLUDE_KEYWORDS):
+    for line in relevant_text_lines(text):
+        if not line or is_non_item_line(line):
+            pending_description = None
             continue
 
         item = extract_item_from_pending(pending_description, line, processed_at=processed_at)
@@ -177,6 +235,8 @@ def parse_items(text, processed_at=None):
         if looks_like_description_fragment(line):
             if pending_description:
                 pending_description = f"{pending_description} {line}".strip()
+            elif parsed_items and not starts_with_lot_number(line):
+                parsed_items[-1]['Item'] = f"{parsed_items[-1]['Item']} {line}".strip()
             else:
                 pending_description = line
         else:
@@ -185,7 +245,6 @@ def parse_items(text, processed_at=None):
     return parsed_items
 
 
-# === Step 4: Save to Excel ===
 def save_to_excel(parsed_items, output_path=Path('output') / 'All_Items.xlsx'):
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

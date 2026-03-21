@@ -1,43 +1,44 @@
 # Auction Tracker
 
-This tool extracts purchased items from auction invoices using Tesseract OCR and exports them into a structured Excel workbook. The current parser is tuned for invoice-style line items that include quantity, unit price, and extended price.
+This tool extracts purchased items from auction invoices using Tesseract OCR and exports them into a structured Excel workbook. The parser is tuned to the invoice item table so header, shipping, and pickup text are less likely to leak into item descriptions.
 
 ## Features
 
 - Tesseract OCR for printed auction invoices and receipts
 - PDF support via Poppler and `pdf2image`
-- Regex-based parsing for auction invoice lines
-- Filters for totals, taxes, and summary rows
+- Regex-based parsing for invoice table rows and multiline descriptions
+- Lot number extraction from invoice rows
+- Filters for totals, taxes, header text, shipping blocks, and summary rows
 - Structured Excel output in `output/All_Items.xlsx`
 - Automatic buyer-premium and total-cost calculation
 - Processed-file tracking in `.processed_files.json`
 
 ## Supported Input Format
 
-The parser currently supports several common OCR invoice layouts, including invoice rows, simple item-price rows, and split description/pricing lines:
+The parser currently supports invoice table rows such as:
 
 ```text
-363 WWII German Helmet 1 x 25.00 25.00 T
-364 WWII Uniform Jacket 2 20.00 40.00 T
-WWII Medal $18.00
-Vintage Military Coat
-1 x 40.00 40.00 T
-Tax1 Default 13.00
-Invoice Total 78.00
+Lot# DESCRIPTION QUANTITY UNIT PRICE EXTENDED PRICE
+17 Vases & Candle Holders 1 x 65.00 65.00 T
+284 World War II Coffee Table Books
+Jones and Summerville authors.
+1 x 10.00 10.00 T
+287 Coffee Table Books Militaria 1 x 5.00 5.00 T
 ```
 
 That produces rows like:
 
-| Date | Item | Cost | Buyer Premium (20%) | Total Cost | Selected for Listing |
-| --- | --- | --- | --- | --- | --- |
-| 2026-03-20 | WWII German Helmet | 25.0 | 5.0 | 30.0 | N |
-| 2026-03-20 | WWII Uniform Jacket | 40.0 | 8.0 | 48.0 | N |
+| Date | Lot Number | Item | Cost | Buyer Premium (20%) | Total Cost | Selected for Listing |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-03-20 | 17 | Vases & Candle Holders | 65.0 | 13.0 | 78.0 | N |
+| 2026-03-20 | 284 | World War II Coffee Table Books Jones and Summerville authors. | 10.0 | 2.0 | 12.0 | N |
 
 Notes:
-- The `Date` column is the processing date, not the invoice date.
+- `Date` is the processing date.
+- `Lot Number` is extracted from the leading table value when present.
 - Supported file types are `.jpg`, `.jpeg`, `.png`, and `.pdf`, case-insensitive.
 - Files are marked as processed even when OCR succeeds but no item rows match.
-- Supported line formats include `qty x unit extended`, `qty unit extended`, simple `item price`, and description lines followed by pricing on the next line.
+- Supported line formats include `qty x unit extended`, `qty unit extended`, simple `item price`, and multiline descriptions followed by pricing on the next line.
 
 ## How to Use
 
@@ -108,7 +109,6 @@ The parser excludes lines containing:
 
 ## Roadmap
 
-- Extract richer invoice metadata such as invoice date, invoice number, and auction details
 - Add end-to-end validation with real sample invoices and expected outputs
 - Improve output structure with per-run files, timestamps, or additional workbook tabs
 - Add setup and runtime diagnostics for missing Tesseract and Poppler dependencies
