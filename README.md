@@ -14,6 +14,16 @@ This tool extracts purchased items from auction invoices using Tesseract OCR and
 - Dedicated `Items` and `Run Summary` tabs for each run workbook
 - Automatic buyer-premium and total-cost calculation
 - Processed-file tracking in `.processed_files.json`
+- **Shared inventory DB writes**: Parallel writes to `shared_inventory.db` for lifecycle tracking
+
+## Shared Inventory Integration
+
+In addition to Excel exports, extracted items are written to a shared SQLite database (`shared_inventory.db` in `/home/peralese/Projects/`) for integrated inventory management with eBay Tracker.
+
+- **DB Writes**: Each extracted item generates a deterministic `item_id` (AUC-{date}-{lot}-{short_hash}) and is inserted/updated in the shared DB.
+- **Deduplication**: File-level (via `source_hash`) and item-level (via `item_id`). Logs actions (inserted, updated, skipped).
+- **Fields Written**: item_id, title, description, purchase_source, purchase_date, lot_number, purchase_price, purchase_fees, total_purchase_cost, listing_status, source_file, source_hash, timestamps.
+- **Behavior**: Preserves all Excel outputs; DB writes happen in parallel after extraction.
 
 ## Supported Input Format
 

@@ -3,6 +3,8 @@ import json
 import re
 from datetime import datetime
 
+from shared_db import connect, check_if_exists, insert_inventory_item, update_inventory_item, get_item_by_id
+
 DATE_PATTERNS = [
     re.compile(r'\bdate\s*[:#-]?\s*(?P<date>\d{1,2}/\d{1,2}/\d{2,4})\b', re.IGNORECASE),
     re.compile(r'\b(?P<date>\d{1,2}/\d{1,2}/\d{2,4})\b'),
@@ -415,7 +417,8 @@ def process_pending_files(image_paths, pdf_paths, processed_hashes):
             print(f"Failed to OCR receipt image '{image_path}': {exc}")
             raise SystemExit(1)
 
-        all_items.extend(items)
+        for item in items:
+            all_items.append({'item': item, 'file_path': str(image_path), 'file_hash': file_hash})
         if items:
             print(f"Extracted {len(items)} items from {image_path}")
         else:
@@ -455,7 +458,8 @@ def process_pending_files(image_paths, pdf_paths, processed_hashes):
 
             invoice_date = extract_invoice_date(text)
             items = parse_items(text, processed_at=processed_at, invoice_date=invoice_date)
-            file_items.extend(items)
+            for item in items:
+                file_items.append({'item': item, 'file_path': str(pdf_path), 'file_hash': file_hash})
             if items:
                 print(f"Extracted {len(items)} items from {pdf_path} page {page_index}")
             else:
@@ -475,13 +479,65 @@ def main():
         print(f"No supported image or PDF files found in: {input_dir}")
         raise SystemExit(1)
 
-    all_items = process_pending_files(image_paths, pdf_paths, processed_hashes)
+    all_item_data = process_pending_files(image_paths, pdf_paths, processed_hashes)
 
     try:
         save_processed_hashes(tracker_path, processed_hashes)
     except Exception as exc:
         print(f"Failed to update processed file tracker: {exc}")
         raise SystemExit(1)
+
+    # Extract items for Excel and DB
+    all_items = [data['item'] for data in all_item_data]
+
+    # Write to shared DB
+    db_actions = []
+    for data in all_item_data:
+        item = data['item']
+        file_path = data['file_path']
+        file_hash = data['file_hash']
+        
+        # Generate item_id
+        purchase_date = item['Date']
+        lot_number = item.get('Lot Number') or 'UNKNOWN'
+        normalized_title = item['Item'].lower().strip()
+        hash_input = (file_hash + normalized_title).encode('utf-8')
+        short_hash = hashlib.sha256(hash_input).hexdigest()[:8]
+        item_id = f"AUC-{purchase_date}-{lot_number}-{short_hash}"
+        
+        # Prepare DB record
+        db_record = {
+            'item_id': item_id,
+            'title': item['Item'],
+            'description': item['Item'],  # Use title as description
+            'purchase_source': 'auction',
+            'purchase_date': purchase_date,
+            'lot_number': lot_number,
+            'purchase_price': item['Cost'],
+            'purchase_fees': item['Buyer Premium (20%)'],
+            'total_purchase_cost': item['Total Cost'],
+            'listing_status': 'purchased',
+            'source_file': file_path,
+            'source_hash': file_hash,
+        }
+        
+        # Check if exists
+        if check_if_exists(item_id):
+            existing = get_item_by_id(item_id)
+            # Simple check: if total_purchase_cost differs, update
+            if existing['total_purchase_cost'] != db_record['total_purchase_cost']:
+                update_inventory_item(item_id, db_record)
+                db_actions.append(f"Updated: {item_id}")
+            else:
+                db_actions.append(f"Skipped (unchanged): {item_id}")
+        else:
+            insert_inventory_item(db_record)
+            db_actions.append(f"Inserted: {item_id}")
+
+    if db_actions:
+        print("\nDB Actions:")
+        for action in db_actions:
+            print(f"- {action}")
 
     if all_items:
         print("\nExtracted Items:")
